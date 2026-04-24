@@ -160,10 +160,30 @@ fn run(allocator: Allocator, main_arena: Allocator) !void {
             }
             defer if (cdp_server) |s| s.deinit();
 
-            var worker_thread = try std.Thread.spawn(.{}, mcpThread, .{ allocator, app });
-            defer worker_thread.join();
+            if (opts.http_port) |port| {
+                // HTTP+SSE transport mode
+                const http_host = opts.http_host orelse "127.0.0.1";
+                const address = std.net.Address.parseIp(http_host, port) catch |err| {
+                    log.fatal(.mcp, "invalid http address", .{ .err = err, .host = http_host, .port = port });
+                    return;
+                };
+                var http_server = lp.mcp.HttpServer.init(allocator, app, address) catch |err| {
+                    log.fatal(.mcp, "http mcp server init error", .{ .err = err });
+                    return;
+                };
+                defer http_server.deinit();
 
-            app.network.run();
+                var worker_thread = try std.Thread.spawn(.{}, httpMcpThread, .{http_server});
+                defer worker_thread.join();
+
+                app.network.run();
+            } else {
+                // stdio transport mode (default)
+                var worker_thread = try std.Thread.spawn(.{}, mcpThread, .{ allocator, app });
+                defer worker_thread.join();
+
+                app.network.run();
+            }
         },
         else => unreachable,
     }
@@ -191,4 +211,9 @@ fn mcpThread(allocator: std.mem.Allocator, app: *App) void {
     lp.mcp.router.processRequests(mcp_server, &stdin.interface) catch |err| {
         log.fatal(.mcp, "mcp error", .{ .err = err });
     };
+}
+
+fn httpMcpThread(http_server: *lp.mcp.HttpServer) void {
+    defer http_server.app.network.stop();
+    http_server.run();
 }

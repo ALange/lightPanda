@@ -138,7 +138,9 @@ await browser.disconnect();
 
 ### Native MCP and skill
 
-The MCP server communicates via MCP JSON-RPC 2.0 over stdio.
+The MCP server supports two transports:
+
+**stdio** (default) — communicates over standard input/output:
 
 Add to your MCP configuration:
 ```json
@@ -147,6 +149,27 @@ Add to your MCP configuration:
     "lightpanda": {
       "command": "/path/to/lightpanda",
       "args": ["mcp"]
+    }
+  }
+}
+```
+
+**HTTP+SSE** — listens on a TCP port using Server-Sent Events for streaming:
+
+```bash
+# Start MCP server over HTTP (SSE) on port 3000
+./lightpanda mcp --http-port 3000
+
+# Optionally bind to a specific host (default: 127.0.0.1)
+./lightpanda mcp --http-port 3000 --http-host 0.0.0.0
+```
+
+Add to your MCP configuration:
+```json
+{
+  "mcpServers": {
+    "lightpanda": {
+      "url": "http://127.0.0.1:3000/sse"
     }
   }
 }
