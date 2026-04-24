@@ -535,4 +535,3 @@ fn statusText(status: u16) []const u8 {
         else => "",
     };
 }
-
