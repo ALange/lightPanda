@@ -134,6 +134,8 @@ const Commands = cli.Builder(.{
         .name = "mcp",
         .options = .{
             .{ .name = "cdp_port", .type = ?u16 },
+            .{ .name = "http_port", .type = ?u16 },
+            .{ .name = "http_host", .type = ?[]const u8 },
         },
         .shared_options = CommonOptions,
     },
@@ -654,8 +656,19 @@ pub fn printUsageAndExit(self: *const Config, success: bool) void {
     ++ common_options ++
         \\
         \\mcp command
-        \\Starts an MCP (Model Context Protocol) server over stdio
-        \\Example: {0s} mcp
+        \\Starts an MCP (Model Context Protocol) server.
+        \\By default, communicates over stdio.
+        \\Use --http-port to start an HTTP+SSE server instead.
+        \\Example (stdio): {0s} mcp
+        \\Example (HTTP):  {0s} mcp --http-port 3000
+        \\
+        \\--http-port     TCP port for the HTTP+SSE MCP transport.
+        \\                When set the server listens on that port instead of using stdio.
+        \\                Defaults to none (stdio mode).
+        \\
+        \\--http-host     Host/IP address for the HTTP+SSE MCP transport.
+        \\                Only meaningful when --http-port is set.
+        \\                Defaults to 127.0.0.1.
         \\
         \\--cookie        Path to a JSON file to load cookies from (read-only).
         \\                Defaults to no cookie loading.
