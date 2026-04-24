@@ -127,6 +127,7 @@ const Commands = cli.Builder(.{
             .{ .name = "wait_until", .type = ?WaitUntil },
             .{ .name = "wait_script", .type = ?[:0]const u8 },
             .{ .name = "wait_selector", .type = ?[:0]const u8 },
+            .{ .name = "har_file", .type = ?[]const u8 },
         },
         .shared_options = CommonOptions,
     },
@@ -378,6 +379,7 @@ pub const DumpFormat = enum {
     wpt,
     semantic_tree,
     semantic_tree_text,
+    har,
 };
 
 pub const WaitUntil = enum {

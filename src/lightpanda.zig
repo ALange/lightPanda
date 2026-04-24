@@ -34,6 +34,7 @@ pub const Session = @import("browser/Session.zig");
 
 pub const js = @import("browser/js/js.zig");
 pub const dump = @import("browser/dump.zig");
+pub const har = @import("browser/har.zig");
 pub const markdown = @import("browser/markdown.zig");
 pub const SemanticTree = @import("SemanticTree.zig");
 pub const CDPNode = @import("cdp/Node.zig");
@@ -59,6 +60,11 @@ pub const FetchOpts = struct {
     dump: dump.Opts,
     dump_mode: ?Config.DumpFormat = null,
     writer: ?*std.Io.Writer = null,
+    // When set, the collected HAR data is written to this file path in
+    // addition to (or instead of) stdout.  Takes effect independently of
+    // dump_mode so that callers can combine HAR file output with any other
+    // dump format.
+    har_file: ?[]const u8 = null,
 };
 pub fn fetch(app: *App, url: [:0]const u8, opts: FetchOpts) !void {
     const http_client = try HttpClient.init(app.allocator, &app.network);
@@ -81,6 +87,17 @@ pub fn fetch(app: *App, url: [:0]const u8, opts: FetchOpts) !void {
             cookies.saveToFile(&session.cookie_jar, cookie_jar_path);
         }
     }
+
+    // Set up HAR recording when --dump har or --har-file is requested.
+    const record_har = opts.har_file != null or opts.dump_mode == .har;
+    var har_recorder = har.Recorder.init(app.allocator);
+    defer har_recorder.deinit();
+    if (record_har) {
+        try har_recorder.register(notification);
+    }
+    defer if (record_har) {
+        har_recorder.unregister(notification);
+    };
 
     const frame = try session.createPage();
 
@@ -155,6 +172,11 @@ pub fn fetch(app: *App, url: [:0]const u8, opts: FetchOpts) !void {
         try runner.waitForScript(script, remaining);
     }
 
+    // Write HAR to file when --har-file is set.
+    if (opts.har_file) |path| {
+        try har_recorder.dumpToFile(path);
+    }
+
     const writer = opts.writer orelse return;
     if (opts.dump_mode) |mode| {
         switch (mode) {
@@ -179,6 +201,7 @@ pub fn fetch(app: *App, url: [:0]const u8, opts: FetchOpts) !void {
                 }
             },
             .wpt => try dumpWPT(frame, writer),
+            .har => try har_recorder.dumpToWriter(writer),
         }
     }
     try writer.flush();
