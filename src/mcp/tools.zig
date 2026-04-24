@@ -898,6 +898,7 @@ fn handleHarDump(server: *Server, arena: std.mem.Allocator, id: std.json.Value, 
         server.har_recorder = lp.har.Recorder.init(server.allocator);
         server.har_recorder.register(server.notification) catch |err| {
             log.err(.mcp, "har recorder re-register failed", .{ .err = err });
+            return server.sendError(id, .InternalError, "Failed to reset HAR recorder");
         };
     }
 

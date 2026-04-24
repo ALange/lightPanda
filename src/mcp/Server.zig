@@ -53,8 +53,11 @@ pub fn init(allocator: std.mem.Allocator, app: *App, writer: *std.io.Writer) !*S
 
     self.session = try self.browser.newSession(self.notification);
 
-    errdefer self.har_recorder.deinit();
     try self.har_recorder.register(self.notification);
+    errdefer {
+        self.har_recorder.unregister(self.notification);
+        self.har_recorder.deinit();
+    }
 
     if (app.config.cookieFile()) |cookie_path| {
         lp.cookies.loadFromFile(self.session, cookie_path);
