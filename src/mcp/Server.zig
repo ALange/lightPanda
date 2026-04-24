@@ -19,6 +19,7 @@ notification: *lp.Notification,
 browser: lp.Browser,
 session: *lp.Session,
 node_registry: CDPNode.Registry,
+har_recorder: lp.har.Recorder,
 
 writer: *std.io.Writer,
 mutex: std.Thread.Mutex = .{},
@@ -47,9 +48,13 @@ pub fn init(allocator: std.mem.Allocator, app: *App, writer: *std.io.Writer) !*S
         .notification = notification,
         .session = undefined,
         .node_registry = CDPNode.Registry.init(allocator),
+        .har_recorder = lp.har.Recorder.init(allocator),
     };
 
     self.session = try self.browser.newSession(self.notification);
+
+    errdefer self.har_recorder.deinit();
+    try self.har_recorder.register(self.notification);
 
     if (app.config.cookieFile()) |cookie_path| {
         lp.cookies.loadFromFile(self.session, cookie_path);
@@ -63,6 +68,8 @@ pub fn deinit(self: *Self) void {
         lp.cookies.saveToFile(&self.session.cookie_jar, cookie_jar_path);
     }
 
+    self.har_recorder.unregister(self.notification);
+    self.har_recorder.deinit();
     self.node_registry.deinit();
     self.aw.deinit();
     self.browser.deinit();

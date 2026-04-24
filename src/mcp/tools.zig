@@ -243,6 +243,19 @@ pub const tool_list = [_]protocol.Tool{
             \\}
         ),
     },
+    .{
+        .name = "harDump",
+        .description = "Return all recorded HTTP request/response pairs as a HAR (HTTP Archive) JSON string. Optionally write the HAR to a file and/or reset the recorder afterwards.",
+        .inputSchema = protocol.minify(
+            \\{
+            \\  "type": "object",
+            \\  "properties": {
+            \\    "file": { "type": "string", "description": "Optional file path to save the HAR data to." },
+            \\    "reset": { "type": "boolean", "description": "Optional flag to reset the recorder after dumping. Defaults to false." }
+            \\  }
+            \\}
+        ),
+    },
 };
 
 pub fn handleList(server: *Server, arena: std.mem.Allocator, req: protocol.Request) !void {
@@ -355,6 +368,7 @@ const ToolAction = enum {
     selectOption,
     setChecked,
     findElement,
+    harDump,
 };
 
 const tool_map = std.StaticStringMap(ToolAction).initComptime(.{
@@ -378,6 +392,7 @@ const tool_map = std.StaticStringMap(ToolAction).initComptime(.{
     .{ "selectOption", .selectOption },
     .{ "setChecked", .setChecked },
     .{ "findElement", .findElement },
+    .{ "harDump", .harDump },
 });
 
 pub fn handleCall(server: *Server, arena: std.mem.Allocator, req: protocol.Request) !void {
@@ -417,6 +432,7 @@ pub fn handleCall(server: *Server, arena: std.mem.Allocator, req: protocol.Reque
         .selectOption => try handleSelectOption(server, arena, req.id.?, call_params.arguments),
         .setChecked => try handleSetChecked(server, arena, req.id.?, call_params.arguments),
         .findElement => try handleFindElement(server, arena, req.id.?, call_params.arguments),
+        .harDump => try handleHarDump(server, arena, req.id.?, call_params.arguments),
     }
 }
 
@@ -851,6 +867,39 @@ fn handleFindElement(server: *Server, arena: std.mem.Allocator, id: std.json.Val
 
     var aw: std.Io.Writer.Allocating = .init(arena);
     try std.json.Stringify.value(matched, .{}, &aw.writer);
+
+    const content = [_]protocol.TextContent([]const u8){.{ .text = aw.written() }};
+    try server.sendResult(id, protocol.CallToolResult([]const u8){ .content = &content });
+}
+
+fn handleHarDump(server: *Server, arena: std.mem.Allocator, id: std.json.Value, arguments: ?std.json.Value) !void {
+    const Params = struct {
+        file: ?[]const u8 = null,
+        reset: bool = false,
+    };
+    const args = try parseArgsOrDefault(Params, arena, arguments, server, id);
+
+    if (args.file) |path| {
+        server.har_recorder.dumpToFile(path) catch |err| {
+            log.err(.mcp, "har dump to file failed", .{ .err = err, .path = path });
+            return server.sendError(id, .InternalError, "Failed to write HAR file");
+        };
+    }
+
+    var aw: std.Io.Writer.Allocating = .init(arena);
+    server.har_recorder.dumpToWriter(&aw.writer) catch |err| {
+        log.err(.mcp, "har dump failed", .{ .err = err });
+        return server.sendError(id, .InternalError, "Failed to serialize HAR data");
+    };
+
+    if (args.reset) {
+        server.har_recorder.unregister(server.notification);
+        server.har_recorder.deinit();
+        server.har_recorder = lp.har.Recorder.init(server.allocator);
+        server.har_recorder.register(server.notification) catch |err| {
+            log.err(.mcp, "har recorder re-register failed", .{ .err = err });
+        };
+    }
 
     const content = [_]protocol.TextContent([]const u8){.{ .text = aw.written() }};
     try server.sendResult(id, protocol.CallToolResult([]const u8){ .content = &content });
