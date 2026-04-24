@@ -125,11 +125,23 @@ fn connectionWorker(self: *Self, conn: std.net.Server.Connection) void {
     };
 }
 
+// Maximum allowed size for a POST /message request body.
+const max_request_body_size = 64 * 1024;
+
+// Raw HTTP headers sent to open an SSE connection.
+const sse_response_headers =
+    "HTTP/1.1 200 OK\r\n" ++
+    "Content-Type: text/event-stream\r\n" ++
+    "Cache-Control: no-cache\r\n" ++
+    "Connection: keep-alive\r\n" ++
+    "Access-Control-Allow-Origin: *\r\n" ++
+    "\r\n";
+
 fn handleConnection(self: *Self, conn: std.net.Server.Connection) !void {
-    var req_buf: [8192]u8 = undefined;
-    var conn_reader = conn.stream.reader(&req_buf);
-    var write_buf: [4096]u8 = undefined;
-    var conn_writer = conn.stream.writer(&write_buf);
+    var http_read_buf: [8192]u8 = undefined;
+    var conn_reader = conn.stream.reader(&http_read_buf);
+    var http_write_buf: [4096]u8 = undefined;
+    var conn_writer = conn.stream.writer(&http_write_buf);
 
     var http_server = std.http.Server.init(conn_reader.interface(), &conn_writer.interface);
 
@@ -175,20 +187,13 @@ fn handleSse(self: *Self, stream: std.net.Stream) !void {
 
     // All SSE data for this session flows through a single buffered writer so
     // that callers only need to flush once per logical event.
-    var write_buf: [4096]u8 = undefined;
-    var stream_writer = stream.writer(&write_buf);
+    var sse_write_buf: [4096]u8 = undefined;
+    var stream_writer = stream.writer(&sse_write_buf);
 
     // Write the HTTP response headers directly to the TCP stream.
     // We bypass std.http.Server's respond helpers because we need an
     // open-ended streaming response (no Content-Length).
-    try stream_writer.interface.writeAll(
-        "HTTP/1.1 200 OK\r\n" ++
-            "Content-Type: text/event-stream\r\n" ++
-            "Cache-Control: no-cache\r\n" ++
-            "Connection: keep-alive\r\n" ++
-            "Access-Control-Allow-Origin: *\r\n" ++
-            "\r\n",
-    );
+    try stream_writer.interface.writeAll(sse_response_headers);
     try stream_writer.interface.flush();
 
     // Create an SseWriter that wraps the stream writer and formats each
@@ -245,12 +250,12 @@ fn handleSse(self: *Self, stream: std.net.Stream) !void {
         std.Thread.sleep(30 * std.time.ns_per_s);
 
         mcp_svr.mutex.lock();
-        const we = stream_writer.interface.writeAll(": keepalive\n\n");
-        const fe = stream_writer.interface.flush();
+        const write_err = stream_writer.interface.writeAll(": keepalive\n\n");
+        const flush_err = stream_writer.interface.flush();
         mcp_svr.mutex.unlock();
 
-        we catch break;
-        fe catch break;
+        write_err catch break;
+        flush_err catch break;
     }
 
     log.info(.mcp, "SSE session closed", .{ .session_id = session_id });
@@ -284,7 +289,7 @@ fn handlePost(self: *Self, req: *std.http.Server.Request) !void {
     const aa = arena.allocator();
 
     var body_reader = req.reader();
-    const body_bytes = try body_reader.interface.readAlloc(aa, 64 * 1024);
+    const body_bytes = try body_reader.interface.readAlloc(aa, max_request_body_size);
     const body = std.mem.trim(u8, body_bytes, " \r\n\t");
 
     if (body.len == 0) {
